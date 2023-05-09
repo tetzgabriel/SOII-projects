@@ -13,11 +13,7 @@
 volatile sig_atomic_t should_run = 1;
 
 void signal_handler(int signum) {
-    if (signum == SIGINT || signum == SIGTSTP) {
-        printf("\n");
-        fflush(stdout);
-    }
-    else if (signum == SIGQUIT) {
+    if (signum == SIGQUIT) {
         should_run = 0;
     }
 }
@@ -54,9 +50,10 @@ int main() {
         // Remove a quebra de linha final do buffer
         buffer[strcspn(buffer, "\n")] = 0;
 
-        if (strncmp(buffer, "exit", 4) == 0) {
-            free(dir); // free the memory allocated by getcwd
-            return 1;
+        // exit ou ctrl+d
+        if (feof(stdin) || buffer[0] == EOF || strncmp(buffer, "exit", 4) == 0) {
+            free(dir); // libera o que o getcwd ocupou
+            return 0;
         }
 
         // Tratamento do comando cd
@@ -85,12 +82,6 @@ int main() {
 
         // Verifica se a tecla Ctrl+Z ou Ctrl+C foi pressionada
         if (buffer[0] == 3 || buffer[0] == 26) {
-            continue;
-        }
-
-        // Verifica se a tecla Ctrl+D foi pressionada
-        if (buffer[0] == 4) {
-            should_run = 0;
             continue;
         }
 
@@ -161,4 +152,5 @@ int main() {
         }
 
     }
+    return 0;
 }

@@ -12,11 +12,7 @@
 
 volatile sig_atomic_t should_run = 1;
 
-void signal_handler(int signum) {
-    if (signum == SIGQUIT) {
-        should_run = 0;
-    }
-}
+void signal_handler(int signum) {}
 
 int main() {
     char buffer[BUFFER_SIZE];

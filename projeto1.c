@@ -11,7 +11,13 @@
 #define BUFFER_SIZE 1024
 #define MAX_COMMANDS 10
 
-volatile sig_atomic_t should_run = 1;
+void quit_signal_handler(int signum) {
+    if(signum == SIGQUIT) { // se for SIGQUIT, termina o programa de maneira async-safe(eu acho)
+        signal(signum, SIG_DFL);
+        raise(signum);
+        return;
+     }
+}
 
 // funcao para executar os comandos dentro das pipes
 void execute_command(char *comando, int input_fd, int output_fd) {
@@ -57,8 +63,8 @@ int main() {
     // Registra os handlers dos sinais
     signal(SIGINT, SIG_IGN);
     signal(SIGTSTP, SIG_IGN);
-
-    while (should_run) {
+    
+    while (1) {
         char *user = getenv("USER"); // nome do usuario
         char host[100];
         gethostname(host, 100); // nome do hospedeiro
@@ -81,8 +87,7 @@ int main() {
 
         // exit ou ctrl+d
         if (feof(stdin) || buffer[0] == EOF || strncmp(buffer, "exit", 4) == 0) {
-            free(dir); // libera o que o getcwd ocupou
-            return 0;
+            quit_signal_handler(SIGQUIT);
         }
 
         // Tratamento do comando cd separado
@@ -106,11 +111,6 @@ int main() {
                 }
             }
 
-            continue;
-        }
-
-        // Verifica se a tecla Ctrl+Z ou Ctrl+C foi pressionada
-        if (buffer[0] == 3 || buffer[0] == 26) {
             continue;
         }
         

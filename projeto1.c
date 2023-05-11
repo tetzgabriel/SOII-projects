@@ -1,5 +1,5 @@
 // Marina Barbosa Américo 201152509
-// João Victor Fleming 
+// Joao Victor Fleming 
 // Gabriel Tetzlaf Mansano  201150956
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,21 +9,54 @@
 #include <signal.h>
 
 #define BUFFER_SIZE 1024
+#define MAX_COMMANDS 10
 
 volatile sig_atomic_t should_run = 1;
 
-void signal_handler(int signum) {}
+// funcao para executar os comandos dentro das pipes
+void execute_command(char *comando, int input_fd, int output_fd) {
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("fork");
+        exit(EXIT_FAILURE);
+    } else if (pid == 0) { // processo filho
+        if (input_fd != STDIN_FILENO) {
+            dup2(input_fd, STDIN_FILENO);
+            close(input_fd);
+        }
+        if (output_fd != STDOUT_FILENO) {
+            dup2(output_fd, STDOUT_FILENO);
+            close(output_fd);
+        }
+
+        // separa comando de argumento
+        char *args[64];
+        int i = 0;
+
+        char *token = strtok(comando, " ");
+        while (token != NULL) {
+            args[i++] = token;
+            token = strtok(NULL, " ");
+        }
+        args[i] = NULL;
+
+        // executa o comando
+        execvp(args[0], args);
+        perror("execvp");
+        exit(EXIT_FAILURE);
+    }
+}
 
 int main() {
     char buffer[BUFFER_SIZE];
     char *token;
     char *args[BUFFER_SIZE];
-    char *args2[BUFFER_SIZE];
+    int num_commands = 0;
 
     // Registra os handlers dos sinais
-    signal(SIGINT, signal_handler);
-    signal(SIGTSTP, signal_handler);
-    signal(SIGQUIT, signal_handler);
+    signal(SIGINT, SIG_IGN);
+    signal(SIGTSTP, SIG_IGN);
 
     while (should_run) {
         char *user = getenv("USER"); // nome do usuario
@@ -52,24 +85,24 @@ int main() {
             return 0;
         }
 
-        // Tratamento do comando cd
+        // Tratamento do comando cd separado
         if (strncmp(buffer, "cd", 2) == 0) {
-            // Divide a entrada em tokens separados por espaço
+            // Divide a entrada em tokens separados por espaco
             token = strtok(buffer, " ");
 
-            // Salva o segundo token, que é o diretório para onde deve mudar
+            // Salva o segundo token, que é o diretorio para onde deve mudar
             token = strtok(NULL, " ");
 
-            // Se não houver segundo token, ou se for "~", muda para o diretório home do usuário
+            // Se nao houver segundo token, ou se for "~", muda para o diretorio home do usuario
             if (token == NULL || strcmp(token, "~") == 0) {
                 char *home_dir = getenv("HOME");
                 if (chdir(home_dir) != 0) {
-                    printf("Erro ao mudar para o diretório home.\n");
+                    printf("Erro ao mudar para o diretorio home.\n");
                 }
             }
-            else { // Se houver um segundo token, tenta mudar para o diretório especificado
+            else { // Se houver um segundo token, tenta mudar para o diretorio especificado
                 if (chdir(token) != 0) {
-                    printf("Erro ao mudar para o diretório %s.\n", token);
+                    printf("Erro ao mudar para o diretorio %s.\n", token);
                 }
             }
 
@@ -80,73 +113,52 @@ int main() {
         if (buffer[0] == 3 || buffer[0] == 26) {
             continue;
         }
-
-        // Divide a entrada em tokens separados por espaço
-        token = strtok(buffer, " ");
-        int i = 0;
-        int pipe_fd[2] = {-1, -1}; // Inicializa os descritores de arquivos do pipe
-
-        // Preenche o vetor de argumentos
+        
+        // funcionalidade de pipe
+        char *token = strtok(buffer, "|");
         while (token != NULL) {
-            if (strcmp(token, "|") == 0) { // Verifica se o token é um pipe
-                if (pipe(pipe_fd) == -1) { // Cria o pipe
-                    printf("Erro ao criar o pipe.\n");
-                    return -1;
-                }
-                break;
-            }
-            args[i++] = token;
-            token = strtok(NULL, " ");
+            args[num_commands++] = token;
+            token = strtok(NULL, "|"); // Separa o buffer em token separados por '|'
         }
 
-        if (pipe_fd[0] != -1) { // Se o pipe foi criado
-            // Cria um novo processo para executar o segundo comando
-            pid_t pid2 = fork();
-            pid_t pid = fork();
+        int fds[MAX_COMMANDS - 1][2];  // Descritor de arquivo pras pipes
 
-            if (pid2 < 0) { // Falha ao criar o processo
-                printf("Erro ao criar processo filho.\n");
-                return -1;
-            }
-            else if (pid2 == 0) { // Código do processo filho
-                // Redireciona a entrada do processo para o pipe
-                dup2(pipe_fd[0], 0);
-                close(pipe_fd[1]);
-
-                // Executa o segundo comando
-                if (execvp(args2[0], args2) == -1) {
-                    printf("Comando inválido.\n");
-                }
-                exit(0);
-            }
-            else { // Código do processo pai
-                close(pipe_fd[0]);
-                close(pipe_fd[1]);
-
-                // Espera pelos dois processos filho terminarem
-                waitpid(pid, NULL, 0);
-                waitpid(pid2, NULL, 0);
-            }
-        }
-        else { // Se o pipe não foi criado
-            // Cria um novo processo para executar o comando
-            pid_t pid = fork();
-
-            if (pid < 0) { // Falha ao criar o processo
-                printf("Erro ao criar processo filho.\n");
-                return -1;
-            }
-            else if (pid == 0) { // Código do processo filho
-                if (execvp(args[0], args) == -1) {
-                    printf("Comando inválido.\n");
-                }
-                exit(0);
-            }
-            else { // Código do processo pai
-                wait(NULL);
+        for (int i = 0; i < num_commands - 1; i++) {
+            if (pipe(fds[i]) == -1) {
+                perror("pipe");
+                exit(EXIT_FAILURE);
             }
         }
 
+        int input_fd = STDIN_FILENO;
+
+        for (int i = 0; i < num_commands; i++) {
+            int output_fd = STDOUT_FILENO;
+
+            if (i < num_commands - 1) {
+                output_fd = fds[i][1];
+            }
+
+            execute_command(args[i], input_fd, output_fd);
+
+            if (i < num_commands - 1) {
+                close(fds[i][1]);
+                input_fd = fds[i][0];
+            }
+        }
+
+        for (int i = 0; i < num_commands - 1; i++) {
+            close(fds[i][0]);
+            close(fds[i][1]);
+        }
+
+        for (int i = 0; i < num_commands; i++) {
+            wait(NULL);
+        }
+
+        num_commands = 0;
+        memset(buffer, 0, BUFFER_SIZE);
+        memset(args, 0, sizeof(args));
     }
     return 0;
 }

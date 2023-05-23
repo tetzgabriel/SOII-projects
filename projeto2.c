@@ -7,7 +7,6 @@
 #include "ds.h"
 
 #define MAX_BLOCKS 100
-#define BLOCK_SIZE 1024
 #define IS_MOUNTED 1234
 
 #define FREE 0
